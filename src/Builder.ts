@@ -1,18 +1,4 @@
-import {
-  RegExpParser,
-  BaseRegExpVisitor,
-  Set,
-  RegExpPattern,
-  RegExpFlags,
-  Disjunction,
-  Alternative,
-  Assertion,
-  Character,
-  Group,
-  GroupBackReference,
-  Quantifier,
-  IRegExpAST,
-} from "regexp-to-ast"
+import { RegExpParser, BaseRegExpVisitor, RegExpPattern, IRegExpAST } from "regexp-to-ast"
 
 type IPossibleValues = {
   [key in keyof BaseRegExpVisitor]: BaseRegExpVisitor[key] extends (arg: infer U) => any
@@ -22,44 +8,53 @@ type IPossibleValues = {
     : never
 }[keyof BaseRegExpVisitor]
 
+interface IBuildContext {
+  groups: Record<string, string>
+}
+
 // Override the visitor methods to add your logic.
-export class MyRegExpVisitor extends BaseRegExpVisitor {
+export class Builder {
   static INFINITY = 20
   static MAX_CODE_POINT = 100
   // static MAX_CODE_POINT = 0x10FFFF // actual max as defined by the ecma standard
 
+  regex: RegExp
+  ignoreCase = false
+
   constructor(regex: RegExp) {
-    super()
+    this.regex = regex
+    this.ignoreCase = regex.ignoreCase
     const regexpParser = new RegExpParser()
 
     const regExpAst = regexpParser.pattern(regex.toString())
 
-    this.builder = this.visitPattern(regExpAst)
+    this.builder = this.createBuilder(regExpAst)
   }
 
-  builder: () => string
+  builder: (context: IBuildContext) => string
 
   build() {
-    return this.builder()
+    const context: IBuildContext = { groups: {} }
+    return this.builder(context)
   }
 
-  visitPattern(node: RegExpPattern) {
+  createBuilder(node: RegExpPattern) {
     return this.visitThing(node.value)
   }
 
-  visitThing<T extends IRegExpAST>(thing: IPossibleValues): () => string {
+  visitThing<T extends IRegExpAST>(thing: IPossibleValues): (context: IBuildContext) => string {
     switch (thing.type) {
       case "Disjunction": {
         const funcs = thing.value.map(val => this.visitThing(val))
-        return () => {
-          return choose(funcs)()
+        return context => {
+          return choose(funcs)(context)
         }
       }
       case "Alternative": {
         const funcs = thing.value.map(val => this.visitThing(val))
-        return () => {
+        return context => {
           let str = ""
-          funcs.forEach(func => (str += func()))
+          funcs.forEach(func => (str += func(context)))
           return str
         }
       }
@@ -68,15 +63,20 @@ export class MyRegExpVisitor extends BaseRegExpVisitor {
           .map(val => (typeof val === "number" ? val : createArrayBetween(val.from, val.to)))
           .reduce((acc: any, el) => (typeof el === "number" ? [...acc, el] : acc.concat(el)), [])
 
-        const getChar = () =>
-          thing.complement
-            ? randomCodePointExcept(inflated, MyRegExpVisitor.MAX_CODE_POINT)
-            : String.fromCodePoint(choose(inflated))
+        const getChar = () => {
+          const codePoint = thing.complement
+            ? randomCodePointExcept(inflated, Builder.MAX_CODE_POINT)
+            : choose(inflated)
+          const char = String.fromCodePoint(codePoint)
+
+          return this.applyIgnoreCase(char)
+        }
+
         return () => {
           if (thing.quantifier) {
             let { atLeast, atMost } = thing.quantifier
             if (atMost === Infinity) {
-              atMost = MyRegExpVisitor.INFINITY
+              atMost = Builder.INFINITY
             }
             const count = rand(atLeast, atMost + 1)
             if (count === 0) {
@@ -96,24 +96,62 @@ export class MyRegExpVisitor extends BaseRegExpVisitor {
             let { atLeast, atMost } = thing.quantifier
 
             if (atMost === Infinity) {
-              atMost = MyRegExpVisitor.INFINITY
+              atMost = Builder.INFINITY
             }
             const count = rand(atLeast, atMost + 1)
             if (count === 0) {
               return ""
             } else {
-              return repeat(char, count)
+              if (this.ignoreCase) {
+                return repeat(() => this.applyIgnoreCase(char), count)
+              } else {
+                return repeat(char, count)
+              }
             }
           } else {
-            return char
+            return this.applyIgnoreCase(char)
           }
         }
       }
-      default:
-        console.log(thing)
-        return () => {
-          return thing.type
+      case "Group": {
+        const valueBuilder = this.visitThing(thing.value)
+        return context => {
+          const value = valueBuilder(context)
+
+          if (thing.capturing) {
+            context.groups[thing.idx] = value
+          }
+          return value
         }
+      }
+      case "GroupBackReference": {
+        return context => {
+          return context.groups[thing.value]
+        }
+      }
+      case "StartAnchor": {
+        return () => ""
+      }
+      case "EndAnchor": {
+        return () => ""
+      }
+      default:
+        console.warn("Regex feature not implemented", thing)
+        return () => {
+          return ``
+        }
+    }
+  }
+
+  applyIgnoreCase(char: string) {
+    if (this.ignoreCase) {
+      if (Math.random() < 0.5) {
+        return char.toUpperCase()
+      } else {
+        return char.toLowerCase()
+      }
+    } else {
+      return char
     }
   }
 }
@@ -124,7 +162,7 @@ function randomCodePointExcept(exceptions: number[], maxCodePoint = 0x10ffff) {
   while (attempts < 1000) {
     const num = rand(0, maxCodePoint + 1)
     if (!exceptions.includes(num)) {
-      return String.fromCodePoint(num)
+      return num
     }
     attempts++
   }
