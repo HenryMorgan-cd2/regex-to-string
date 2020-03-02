@@ -13,6 +13,10 @@ function testRegex(regex: RegExp, times = 1000) {
   })
 }
 
+testRegex.todo = regex => {
+  test.todo(`Regex: ${regex.toString()}`)
+}
+
 testRegex(/a/)
 testRegex(/aaaa/)
 testRegex(/a+/)
@@ -32,7 +36,7 @@ testRegex(/^hello$/)
 
 testRegex(/\w+@\w+\.\w{1,2}(\.\w{1,2})?/)
 
-testRegex(/(?=h).i/)
+testRegex.todo(/(?=h).i/)
 
 test("case insensitive literals appear in both cases", () => {
   const builder = new Builder(/a/i)

@@ -32,9 +32,10 @@ Builder.INFINITY = 10
 Set the highest code point to be used for `.`:
 
 ```
-Builder.INFINITY = 100  // max is 0x10FFFF
+Builder.MAX_CODE_POINT = 100  // max is 0x10FFFF
 ```
 
 
 ## TODO
 assertions
+add options to allow generated strings to appear more realistic e.g `.build({lowerCase: true})`
